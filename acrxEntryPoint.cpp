@@ -223,7 +223,7 @@ public:
 				// Create circle around the text
 				AcDbCircle* pCircle = new AcDbCircle(centerPoint, AcGeVector3d::kZAxis, (cornerPointMax.y - cornerPointMin.y) * 0.7);
 				pCircle->setColorIndex(1); // Set circle color
-				//pCircle->setLayer(L"$GRID");
+				pCircle->setLayer(L"$GRID");
 				pCircle->setLinetype(L"CONTINUOUS");
 				pBlockTableRecord->appendAcDbEntity(pCircle);
 				pCircle->close();
@@ -253,7 +253,7 @@ public:
 				pMText->setLocation(centerPoint);
 				pMText->setAttachment(AcDbMText::kMiddleCenter);
 				pMText->setTextHeight((cornerPointMax.y - cornerPointMin.y) * 0.6);
-				//pMText->setLayer(L"$GRID");
+				pMText->setLayer(L"$GRID");
 				pMText->setColorIndex(7);
 				pMText->setTextStyle(textStyleId);
 				pBlockTableRecord->appendAcDbEntity(pMText);
@@ -265,7 +265,7 @@ public:
 				pLeader->setColorIndex(1);
 				pLeader->setLinetype(L"CENTER");
 				pLeader->setHasArrowHead(false);
-				//pLeader->setLayer(L"$GRID");
+				pLeader->setLayer(L"$GRID");
 				pBlockTableRecord->appendAcDbEntity(pLeader);
 				pLeader->close();
 
