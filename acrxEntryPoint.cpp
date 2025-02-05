@@ -140,20 +140,145 @@ public:
 				}
 			}
 		}
+		// Perform the equivalent LINQ operation in C++
+		std::map<int, std::vector<AcDbBlockReference*>> groupedBlocks;
+		for (auto pBlockRef : blockList) {
+			AcDbExtents extents;
+			if (pBlockRef->getGeomExtents(extents) == Acad::eOk) {
+				double y = extents.maxPoint().y;
+				double x = extents.maxPoint().x;
+				int groupKey = static_cast<int>(y / 0.005);
+				groupedBlocks[groupKey].push_back(pBlockRef);
+			}
+		}
 
+		std::vector<AcDbBlockReference*> filteredBlockList;
+		for (auto& group : groupedBlocks) {
+			auto& blockRefs = group.second;
+			auto it = std::max_element(blockRefs.begin(), blockRefs.end(), [](AcDbBlockReference* a, AcDbBlockReference* b) {
+				AcDbExtents extentsA, extentsB;
+				a->getGeomExtents(extentsA);
+				b->getGeomExtents(extentsB);
+				return extentsA.maxPoint().x > extentsB.maxPoint().x;
+				});
+			if (it != blockRefs.end()) {
+				filteredBlockList.push_back(*it);
+			}
+		}
+		std::sort(filteredBlockList.begin(), filteredBlockList.end(), [](AcDbBlockReference* blockRef1, AcDbBlockReference* blockRef2) {
+			if (blockRef1 != nullptr && blockRef2 != nullptr) {
+				AcDbExtents extents1, extents2;
+				blockRef1->getGeomExtents(extents1);
+				blockRef2->getGeomExtents(extents2);
+				return extents1.maxPoint().y > extents2.maxPoint().y;
+			}
+			return false; // Default comparison result if any object is null
+		});
 		// Draw circles around each block reference in the blockList
+		//if (pDb->getBlockTable(pBlockTable, AcDb::kForRead) != Acad::eOk) return;
+		//AcDbBlockTableRecord* pBlockTableRecord = nullptr;
+		/*if (pBlockTable->getAt(ACDB_MODEL_SPACE, pBlockTableRecord, AcDb::kForWrite) != Acad::eOk) {
+			pBlockTable->close();
+			return;
+		}*/
+		//pBlockTable->close();
+
+		// Add a layer in layer table with name "$GRID" if it does not exist
+		AcDbLayerTable* pLayerTable;
+		if (pDb->getLayerTable(pLayerTable, AcDb::kForRead) != Acad::eOk) return;
+		if (!pLayerTable->has(L"$GRID")) {
+			pLayerTable->upgradeOpen();
+			AcDbLayerTableRecord* pLayerRecord = new AcDbLayerTableRecord();
+			pLayerRecord->setName(L"$GRID");
+			pLayerTable->add(pLayerRecord);
+			pLayerRecord->close();
+			pLayerTable->close();
+		}
 		if (pDb->getBlockTable(pBlockTable, AcDb::kForRead) != Acad::eOk) return;
-		AcDbBlockTableRecord* pBlockTableRecord = nullptr;
+		AcDbBlockTableRecord* pBlockTableRecord;
 		if (pBlockTable->getAt(ACDB_MODEL_SPACE, pBlockTableRecord, AcDb::kForWrite) != Acad::eOk) {
 			pBlockTable->close();
 			return;
 		}
 		pBlockTable->close();
+		double leaderLength = 15.0;
+		if (!filteredBlockList.empty()) {
+			acutPrintf(L"Found %d block references with one corner inside the boundary region.\n", filteredBlockList.size());
+			int count = 1;
 
-		for (auto pBlockRef : blockList) {
+			for (auto pBlockRef : filteredBlockList) {
+				AcDbExtents extents;
+				if (pBlockRef->getGeomExtents(extents) != Acad::eOk) continue;
+
+				AcGePoint3d cornerPointMax = extents.maxPoint();
+				AcGePoint3d cornerPointMin = extents.minPoint();
+				double widthCenter = (cornerPointMax.y + cornerPointMin.y) / 2;
+
+				
+
+				AcGePoint3d leaderStart(cornerPointMin.x - leaderLength, widthCenter, 0);
+				AcGePoint3d leaderEnd(cornerPointMin.x, widthCenter, 0);
+				AcGePoint3d centerPoint(leaderStart.x - (cornerPointMax.y - cornerPointMin.y) * 0.7, leaderStart.y, 0);
+
+				// Create circle around the text
+				AcDbCircle* pCircle = new AcDbCircle(centerPoint, AcGeVector3d::kZAxis, (cornerPointMax.y - cornerPointMin.y) * 0.7);
+				pCircle->setColorIndex(1); // Set circle color
+				//pCircle->setLayer(L"$GRID");
+				pCircle->setLinetype(L"CONTINUOUS");
+				pBlockTableRecord->appendAcDbEntity(pCircle);
+				pCircle->close();
+
+				AcDbTextStyleTable* pTextStyleTable;
+				if (pDb->getTextStyleTable(pTextStyleTable, AcDb::kForRead) != Acad::eOk) return;
+				AcDbObjectId textStyleId;
+				AcDbTextStyleTableRecord* pTextStyleRecord;
+				if (pTextStyleTable->getAt(L"Arial", pTextStyleRecord, AcDb::kForRead) == Acad::eOk) {
+					textStyleId = pTextStyleRecord->objectId();
+					pTextStyleRecord->close();
+				}
+				else {
+					pTextStyleTable->upgradeOpen();
+					AcDbTextStyleTableRecord* pNewTextStyle = new AcDbTextStyleTableRecord();
+					pNewTextStyle->setName(L"Arial");
+					pNewTextStyle->setFileName(L"Arial.ttf"); // Assuming TrueType font, adjust if necessary
+					if (pTextStyleTable->add(pNewTextStyle) == Acad::eOk) {
+						textStyleId = pNewTextStyle->objectId();
+						pNewTextStyle->close();
+					}
+				}
+				pTextStyleTable->close();
+
+				AcDbMText* pMText = new AcDbMText();
+				pMText->setContents(std::to_wstring(count).c_str());
+				pMText->setLocation(centerPoint);
+				pMText->setAttachment(AcDbMText::kMiddleCenter);
+				pMText->setTextHeight((cornerPointMax.y - cornerPointMin.y) * 0.6);
+				//pMText->setLayer(L"$GRID");
+				pMText->setColorIndex(7);
+				pMText->setTextStyle(textStyleId);
+				pBlockTableRecord->appendAcDbEntity(pMText);
+				pMText->close();
+
+				AcDbLeader* pLeader = new AcDbLeader();
+				pLeader->appendVertex(leaderStart);
+				pLeader->appendVertex(leaderEnd);
+				pLeader->setColorIndex(1);
+				pLeader->setLinetype(L"CENTER");
+				pLeader->setHasArrowHead(false);
+				//pLeader->setLayer(L"$GRID");
+				pBlockTableRecord->appendAcDbEntity(pLeader);
+				pLeader->close();
+
+				count++;
+			}
+		}
+		else {
+			acutPrintf(L"No block references found inside the boundary region.\n");
+		}
+		/*for (auto pBlockRef : filteredBlockList) {
 			DrawCircleAroundInverterBlock(pBlockRef, pBlockTableRecord);
 		}
-
+		*/
 		pBlockTableRecord->close();
 
 		// Clean up
