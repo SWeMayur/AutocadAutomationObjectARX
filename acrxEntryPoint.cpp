@@ -5,6 +5,8 @@
 #include <tchar.h>
 #include <vector>
 #include <list>
+#include <chrono>
+#include <acutads.h>
 #define szRDS _RXST("MK")
 
 class CArxProjectSampleApp : public AcRxArxApp {
@@ -87,6 +89,7 @@ public:
 	}
 
 	static void ADSKTest_TEST_INVERTER_BLOCK() {
+		auto start = std::chrono::high_resolution_clock::now();
 		AcDbDatabase* pDb = acdbHostApplicationServices()->workingDatabase();
 		AcDbBlockTable* pBlockTable = nullptr;
 		AcDbPolyline* pPolyline = SelectBlockBoundary();
@@ -286,6 +289,13 @@ public:
 			acutRelRb(filter);
 		}
 		acedSSFree(ss);
+		// Stop the stopwatch
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed = end - start;
+		acutPrintf(L"Elapsed time: .\n", elapsed.count());
+		/*AcString message;
+		message.format(L"Elapsed time: %f seconds.", elapsed.count());
+		acedAlert(message.kwszPtr());*/
 	}
 
 	static bool IsPointInsidePolyline(AcDbPolyline* polyline, const AcGePoint3d& point) {
