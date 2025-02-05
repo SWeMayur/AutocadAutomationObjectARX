@@ -132,8 +132,8 @@ public:
 					AcString blockName;
 					pBlockTableRecord->getName(blockName);
 					pBlockTableRecord->close();
-
-					if (blockName.find(L"MMS Table") != -1 || blockName.find(L"MMS") != -1) {
+					AcGePoint3d centerPoint = GetTableCenter(pBlockRef.object());
+					if ((blockName.find(L"MMS Table") != -1 || blockName.find(L"MMS") != -1) && IsPointInsidePolyline(pPolyline, centerPoint)) {
 						// Add block reference to the list
 						blockList.push_back(pBlockRef.object());
 					}
