@@ -89,28 +89,12 @@ public:
 		}
 	}
 
-	static void ADSKTest_TEST_INVERTER_BLOCK() {
-		auto start = std::chrono::high_resolution_clock::now();
-		AcDbDatabase* pDb = acdbHostApplicationServices()->workingDatabase();
-		AcDbBlockTable* pBlockTable = nullptr;
-		AcDbPolyline* pPolyline = SelectBlockBoundary();
-		if (pPolyline == nullptr) {
-			return;
-		}
-
-		AcDbExtents extents;
-		if (pPolyline->getGeomExtents(extents) != Acad::eOk) {
-			acutPrintf(L"Error: Failed to get geometric extents.\n");
-			pPolyline->close();
-			return;
-		}
+	static resbuf* SelectCrossingPolygon(AcDbPolyline* pPolyline) {
 		int numberOFVertices = static_cast<int>(pPolyline->numVerts());
 		if (numberOFVertices < 2) {
 			acutPrintf(L"Error: Polyline must have at least 2 vertices.\n");
-			return;
+			return nullptr;
 		}
-
-		// Create the resbuf linked list for the crossing polygon points
 		struct resbuf* ptsRb = nullptr;
 		struct resbuf* lastRb = nullptr;
 		for (int i = 0; i < numberOFVertices; i++) {
@@ -139,6 +123,32 @@ public:
 			rb->resval.rpoint[2] = ptsRb->resval.rpoint[2];
 			lastRb->rbnext = rb;
 		}
+		return ptsRb;
+	}
+
+	static void ADSKTest_TEST_INVERTER_BLOCK() {
+		auto start = std::chrono::high_resolution_clock::now();
+		AcDbDatabase* pDb = acdbHostApplicationServices()->workingDatabase();
+		AcDbBlockTable* pBlockTable = nullptr;
+		AcDbPolyline* pPolyline = SelectBlockBoundary();
+		if (pPolyline == nullptr) {
+			return;
+		}
+
+		AcDbExtents extents;
+		if (pPolyline->getGeomExtents(extents) != Acad::eOk) {
+			acutPrintf(L"Error: Failed to get geometric extents.\n");
+			pPolyline->close();
+			return;
+		}
+		int numberOFVertices = static_cast<int>(pPolyline->numVerts());
+		if (numberOFVertices < 2) {
+			acutPrintf(L"Error: Polyline must have at least 2 vertices.\n");
+			return;
+		}
+
+		// Create the resbuf linked list for the crossing polygon points
+		struct resbuf* ptsRb = SelectCrossingPolygon(pPolyline);
 
 		resbuf* filter = acutBuildList(RTDXF0, _T("INSERT"), NULL);
 		if (filter == nullptr) {
@@ -149,7 +159,7 @@ public:
 
 		ads_name ss;
 		int result = acedSSGet(L"CP", ptsRb, NULL, filter, ss);
-        
+
 		acutPrintf(L"\nacedSSGet result: %d", result);
 
 		std::vector<AcDbBlockReference*> blockList;
@@ -211,15 +221,7 @@ public:
 				return extents1.maxPoint().y > extents2.maxPoint().y;
 			}
 			return false; // Default comparison result if any object is null
-		});
-		// Draw circles around each block reference in the blockList
-		//if (pDb->getBlockTable(pBlockTable, AcDb::kForRead) != Acad::eOk) return;
-		//AcDbBlockTableRecord* pBlockTableRecord = nullptr;
-		/*if (pBlockTable->getAt(ACDB_MODEL_SPACE, pBlockTableRecord, AcDb::kForWrite) != Acad::eOk) {
-			pBlockTable->close();
-			return;
-		}*/
-		//pBlockTable->close();
+			});
 
 		// Add a layer in layer table with name "$GRID" if it does not exist
 		AcDbLayerTable* pLayerTable;
@@ -252,7 +254,7 @@ public:
 				AcGePoint3d cornerPointMin = extents.minPoint();
 				double widthCenter = (cornerPointMax.y + cornerPointMin.y) / 2;
 
-				
+
 
 				AcGePoint3d leaderStart(cornerPointMin.x - leaderLength, widthCenter, 0);
 				AcGePoint3d leaderEnd(cornerPointMin.x, widthCenter, 0);
