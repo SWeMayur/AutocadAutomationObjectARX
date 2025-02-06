@@ -8,6 +8,15 @@
 #include <chrono>
 #include <array> 
 #include <acutads.h>
+#include "aced.h"        // AutoCAD command functions
+#include "acdocman.h"    // Document management
+#include "dbents.h"      // Entity classes
+#include "actrans.h"     // Transactions
+#include "geassign.h"    // Geometric conversions
+#include <Shlobj.h> // Include for SHGetFolderPathW
+#include "acedads.h" 
+#include "acedCmdNF.h"
+#pragma comment(lib, "Shell32.lib") // Link against Shell32.lib
 #define szRDS _RXST("MK")
 
 class CArxProjectSampleApp : public AcRxArxApp {
@@ -124,6 +133,58 @@ public:
 			lastRb->rbnext = rb;
 		}
 		return ptsRb;
+	}
+
+	static void ADSKTest_Test_TABLE_PILING() {
+		const wchar_t* filename = L"CoordMark.dwg";
+		const wchar_t* blockName = L"AUTOCRDS";
+		try {
+			// Get the path to the source DWG file
+			wchar_t tempPath[MAX_PATH];
+			SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, tempPath);
+			std::wstring dwgPath = std::wstring(tempPath) + L"\\Autodesk\\ApplicationPlugins\\SolarInfraCADAutomate.bundle\\Resources\\" + filename;
+
+			// Open the source DWG file
+			AcDbDatabase* pOpenDb = new AcDbDatabase(Adesk::kFalse);
+			if (pOpenDb->readDwgFile(dwgPath.c_str()) != Acad::eOk) {
+				acutPrintf(L"\nError: Unable to read DWG file.");
+				delete pOpenDb;
+				return;
+			}
+
+			// Collect block definitions from source DWG file
+			AcDbObjectIdArray ids;
+			AcDbBlockTable* pBlockTable;
+			if (pOpenDb->getBlockTable(pBlockTable, AcDb::kForRead) != Acad::eOk) {
+				acutPrintf(L"\nError: Unable to open block table.");
+				delete pOpenDb;
+				return;
+			}
+
+			AcDbObjectId blockId;
+			if (pBlockTable->getAt(blockName, blockId) == Acad::eOk) {
+				ids.append(blockId);
+			}
+			pBlockTable->close();
+
+			if (ids.length() != 0) {
+				AcDbDatabase* pDestDb = acdbHostApplicationServices()->workingDatabase();
+
+				// Clone the new block from the source database
+				AcDbIdMapping idMap;
+				if (pDestDb->wblockCloneObjects(ids, pDestDb->blockTableId(), idMap, AcDb::kDrcReplace) != Acad::eOk) {
+					acutPrintf(L"\nError: Unable to clone block definitions.");
+				}
+			}
+
+			delete pOpenDb;
+		}
+		catch (const Acad::ErrorStatus& es) {
+			acutPrintf(L"\nAutoCAD Error: %d", es);
+		}
+		catch (const std::exception& ex) {
+			acutPrintf(L"\nException: %s", ex.what());
+		}
 	}
 
 	static void ADSKTest_TEST_INVERTER_BLOCK() {
@@ -315,8 +376,14 @@ public:
 		else {
 			acutPrintf(L"No block references found inside the boundary region.\n");
 		}
+		acedCommandS(RTSTR, L"_.ATTDIA", RTSTR, L"0", RTNONE);
 		pBlockTableRecord->close();
-
+		for (int i = 0; i < numberOFVertices; i++) {
+			AcGePoint3d pt;
+			pPolyline->getPointAt(i, pt);
+			// Use the command line to insert the block
+			acedCommandS(RTSTR, L"-INSERT", RTSTR, L"AUTOCRDS", RTPOINT, AcGePoint2d(pt.x, pt.y), RTREAL, 1.0, RTREAL, 1.0, RTREAL, 0.0, RTSTR, "", RTSTR, "", RTNONE);
+		}
 		// Clean up
 		if (filter != nullptr) {
 			acutRelRb(filter);
@@ -330,6 +397,58 @@ public:
 		message.format(L"Elapsed time: %f seconds.", elapsed.count());
 		acedAlert(message.kwszPtr());*/
 	}
+
+	static void InsertBlocksAtPolylineVertices(AcDbPolyline* pPolyline, AcDbDatabase* pDb, int numberOfVertices) {
+		if (!pPolyline || !pDb) return;
+
+		// Open the block table
+		AcDbBlockTable* pBlockTable;
+		if (pDb->getBlockTable(pBlockTable, AcDb::kForRead) != Acad::eOk) {
+			acutPrintf(L"Error: Unable to open block table.\n");
+			return;
+		}
+
+		// Get block definition (block table record)
+		AcDbBlockTableRecord* pBlockDef;
+		if (pBlockTable->getAt(L"AUTOCRDS", pBlockDef, AcDb::kForRead) != Acad::eOk) {
+			pBlockTable->close();
+			acutPrintf(L"Error: Block 'AUTOCRDS' not found!\n");
+			return;
+		}
+
+		// Open model space for writing
+		AcDbBlockTableRecord* pModelSpace;
+		if (pBlockTable->getAt(ACDB_MODEL_SPACE, pModelSpace, AcDb::kForWrite) != Acad::eOk) {
+			pBlockDef->close();
+			pBlockTable->close();
+			acutPrintf(L"Error: Unable to open model space.\n");
+			return;
+		}
+
+		for (int i = 0; i < numberOfVertices; i++) {
+			AcGePoint3d pt;
+			pPolyline->getPointAt(i, pt);
+
+			// Create block reference
+			AcDbBlockReference* pBlockRef = new AcDbBlockReference(pt, pBlockDef->objectId());
+
+			// Add to model space
+			if (pModelSpace->appendAcDbEntity(pBlockRef) == Acad::eOk) {
+				DrawCircleAroundInverterBlock(pBlockRef, pModelSpace);
+				pBlockRef->close();
+			}
+			else {
+				acutPrintf(L"Error: Unable to append block reference to model space.\n");
+				delete pBlockRef; // Cleanup if failed
+			}
+		}
+
+		// Close all opened objects
+		pModelSpace->close();
+		pBlockDef->close();
+		pBlockTable->close();
+	}
+
 
 	static bool IsPointInsidePolyline(AcDbPolyline* polyline, const AcGePoint3d& point) {
 		bool inside = false;
@@ -362,6 +481,7 @@ public:
 			(cornerPointMax.y + cornerPointMin.y) / 2,
 			(cornerPointMax.z + cornerPointMin.z) / 2);
 	}
+	
 
 	static void DrawCircleAroundInverterBlock(AcDbBlockReference* pBlockRef, AcDbBlockTableRecord* pBlockTableRecord) {
 		AcGePoint3d center = GetTableCenter(pBlockRef);
@@ -459,4 +579,5 @@ public:
 IMPLEMENT_ARX_ENTRYPOINT(CArxProjectSampleApp)
 
 ACED_ARXCOMMAND_ENTRY_AUTO(CArxProjectSampleApp, ADSKTest, _TEST_DRAW_LINE, _TEST_DRAW_LINE, ACRX_CMD_MODAL, NULL)
+ACED_ARXCOMMAND_ENTRY_AUTO(CArxProjectSampleApp, ADSKTest, _Test_TABLE_PILING, _Test_TABLE_PILING, ACRX_CMD_MODAL, NULL)
 ACED_ARXCOMMAND_ENTRY_AUTO(CArxProjectSampleApp, ADSKTest, _TEST_INVERTER_BLOCK, _TEST_INVERTER_BLOCK, ACRX_CMD_MODAL, NULL)
