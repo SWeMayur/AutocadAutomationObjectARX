@@ -6,6 +6,7 @@
 #include <vector>
 #include <list>
 #include <chrono>
+#include <array> 
 #include <acutads.h>
 #define szRDS _RXST("MK")
 
@@ -103,18 +104,52 @@ public:
 			pPolyline->close();
 			return;
 		}
+		int numberOFVertices = static_cast<int>(pPolyline->numVerts());
+		if (numberOFVertices < 2) {
+			acutPrintf(L"Error: Polyline must have at least 2 vertices.\n");
+			return;
+		}
 
-		ads_point pt1, pt2;
-		pt1[0] = extents.minPoint().x;
-		pt1[1] = extents.minPoint().y;
-		pt1[2] = extents.minPoint().z;
-		pt2[0] = extents.maxPoint().x;
-		pt2[1] = extents.maxPoint().y;
-		pt2[2] = extents.maxPoint().z;
+		// Create the resbuf linked list for the crossing polygon points
+		struct resbuf* ptsRb = nullptr;
+		struct resbuf* lastRb = nullptr;
+		for (int i = 0; i < numberOFVertices; i++) {
+			AcGePoint3d pt;
+			pPolyline->getPointAt(i, pt);
+
+			struct resbuf* rb = acutNewRb(RT3DPOINT);
+			rb->resval.rpoint[0] = pt.x;
+			rb->resval.rpoint[1] = pt.y;
+			rb->resval.rpoint[2] = pt.z;  // Use Z = 0 if 2D polyline
+
+			if (ptsRb == nullptr) {
+				ptsRb = rb;
+			}
+			else {
+				lastRb->rbnext = rb;
+			}
+			lastRb = rb;
+		}
+
+		// Ensure the polygon is closed by adding the first point at the end
+		if (ptsRb != nullptr) {
+			struct resbuf* rb = acutNewRb(RT3DPOINT);
+			rb->resval.rpoint[0] = ptsRb->resval.rpoint[0];
+			rb->resval.rpoint[1] = ptsRb->resval.rpoint[1];
+			rb->resval.rpoint[2] = ptsRb->resval.rpoint[2];
+			lastRb->rbnext = rb;
+		}
 
 		resbuf* filter = acutBuildList(RTDXF0, _T("INSERT"), NULL);
+		if (filter == nullptr) {
+			acutPrintf(L"Error: Failed to build filter list.\n");
+			acutRelRb(ptsRb);  // Clean up the resbuf linked list
+			return;
+		}
+
 		ads_name ss;
-		int result = acedSSGet(L"C", pt2, pt1, filter, ss);
+		int result = acedSSGet(L"CP", ptsRb, NULL, filter, ss);
+        
 		acutPrintf(L"\nacedSSGet result: %d", result);
 
 		std::vector<AcDbBlockReference*> blockList;
