@@ -315,10 +315,6 @@ public:
 		else {
 			acutPrintf(L"No block references found inside the boundary region.\n");
 		}
-		/*for (auto pBlockRef : filteredBlockList) {
-			DrawCircleAroundInverterBlock(pBlockRef, pBlockTableRecord);
-		}
-		*/
 		pBlockTableRecord->close();
 
 		// Clean up
